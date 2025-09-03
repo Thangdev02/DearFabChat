@@ -1,30 +1,3 @@
-products = [
-    {
-        "id": "1",
-        "name": "Tranh Vải Tái Chế - Hoa Sen",
-        "price": 400000,
-        "isNew": True,
-        "isFeatured": True,
-        "sizes": {
-            "S": {"price": 400000, "quantity": 6},
-            "M": {"price": 450000, "quantity": 7},
-            "L": {"price": 500000, "quantity": 5},
-        },
-    },
-    {
-        "id": "2",
-        "name": "Tranh Vải Tái Chế - Cánh Đồng",
-        "price": 400000,
-        "isNew": True,
-        "isFeatured": False,
-        "sizes": {
-            "S": {"price": 400000, "quantity": 6},
-            "M": {"price": 450000, "quantity": 7},
-            "L": {"price": 500000, "quantity": 5},
-        },
-    },
-    # Các sản phẩm khác...
-]
 # Import thư viện Gemini AI
 import google.generativeai as genai
 
@@ -36,6 +9,11 @@ from pprint import pformat
 # Import FastAPI và Pydantic
 from fastapi import FastAPI
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+
+# Import pyodbc để kết nối SQL Server
+import pyodbc
+
 # Tải biến môi trường
 load_dotenv()
 
@@ -45,13 +23,45 @@ genai.configure(api_key=os.getenv("API_KEY"))
 # Khởi tạo mô hình Gemini
 model = genai.GenerativeModel("gemini-1.5-flash")
 
+# ===== KẾT NỐI SQL SERVER =====
+def get_products():
+    conn_str = (
+        "DRIVER={ODBC Driver 17 for SQL Server};"
+        "SERVER=14.225.253.29,1433;"
+        "DATABASE=DearFab;"
+        "UID=sa;"
+        "PWD=winnertech123@;"
+        "TrustServerCertificate=Yes;"
+        "Encrypt=Yes;"
+        "MultipleActiveResultSets=True;"
+    )
+    products = []
+    try:
+        with pyodbc.connect(conn_str) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT TOP (1000) [Id], [Name], [Description], [Image], 
+                       [IsNew], [IsActive], [CreateAt], [UpdateAt], [DeleteAt]
+                FROM [DearFab].[dbo].[Product]
+            """)
+            columns = [column[0] for column in cursor.description]
+            for row in cursor.fetchall():
+                products.append(dict(zip(columns, row)))
+    except Exception as e:
+        print("Database error:", e)
+    return products
+
 # Định nghĩa schema dữ liệu cho request
 class ChatRequest(BaseModel):
     prompt: str
 
 # Khởi tạo ứng dụng FastAPI
-app = FastAPI(title="DearFab Chatbot API", description="Chatbot DearFab sử dụng Gemini AI", version="1.0", docs_url="/docs")
-from fastapi.middleware.cors import CORSMiddleware
+app = FastAPI(
+    title="DearFab Chatbot API",
+    description="Chatbot DearFab",
+    version="1.0",
+    docs_url="/docs"
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,6 +70,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 # Endpoint GET /
 @app.get("/")
 async def read_root():
@@ -69,6 +80,8 @@ async def read_root():
 @app.post("/chat")
 async def chat(request: ChatRequest):
     try:
+        # Lấy danh sách sản phẩm từ DB
+        products = get_products()
         product_context = pformat(products, width=120)
 
         prompt = f"""
@@ -76,7 +89,7 @@ async def chat(request: ChatRequest):
         Dưới đây là danh sách các sản phẩm tranh vải của DearFab:
 
         {product_context}
-
+        Khi nào khách hàng hỏi đến sản phẩm thì hãy
         Hãy sử dụng thông tin này để tư vấn sản phẩm, kiểm tra hàng còn hay không, giới thiệu sản phẩm nổi bật, mới, hoặc theo kích cỡ nếu người dùng hỏi.
         Khi muốn in đậm, bạn dùng dấu ** như **này**. Khi xuống dòng thì dùng dấu \\n\\n.
         Khi người dùng hỏi về cách liên hệ, hãy bảo họ nhắn qua Facebook fanpage DearFab: https://www.facebook.com/share/1D6g3LzNCj/?mibextid=wwXIfr hoặc Zalo: 0877888036
